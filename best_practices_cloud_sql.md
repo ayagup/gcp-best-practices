@@ -1,0 +1,563 @@
+# Cloud SQL Best Practices
+
+## Overview
+Cloud SQL is a fully managed relational database service for MySQL, PostgreSQL, and SQL Server. This guide covers best practices for performance, availability, security, and cost optimization.
+
+---
+
+## 1. Instance Configuration & Sizing
+
+### Choose the Right Database Engine
+- **MySQL**: General-purpose applications, WordPress, e-commerce
+- **PostgreSQL**: Complex queries, geospatial data, JSON support, analytical workloads
+- **SQL Server**: Windows/.NET applications, enterprise applications
+
+### Machine Type Selection
+✅ **Shared-core**: Development/testing environments (db-f1-micro, db-g1-small)
+✅ **Standard**: Production workloads (db-n1-standard-1 to db-n1-standard-96)
+✅ **High-memory**: Memory-intensive workloads (db-n1-highmem-2 to db-n1-highmem-96)
+✅ **Custom**: Specific CPU/memory requirements
+
+### Sizing Best Practices
+✅ Start with monitoring baseline workload performance
+✅ Use **Cloud Monitoring** to track CPU, memory, and disk usage
+✅ Right-size based on actual usage patterns (not peak capacity)
+✅ Enable **automatic storage increase** to prevent disk full errors
+✅ Leave 20-30% headroom for CPU and memory for spikes
+
+### Storage Configuration
+✅ Use **SSD storage** for production (better performance than HDD)
+✅ Start with 10GB minimum, scale up as needed
+✅ Enable **automatic storage increase** (recommended)
+✅ Plan for 2-3x data size for indexes, temp tables, transaction logs
+✅ Monitor storage I/O metrics (IOPS, throughput)
+
+---
+
+## 2. High Availability & Disaster Recovery
+
+### High Availability Configuration
+✅ Enable **Regional HA** (99.95% SLA) for production instances
+✅ Configure HA in same region, different zones
+✅ Understand automatic failover triggers (instance/zone failure)
+✅ Test failover procedures regularly
+✅ Plan for ~1-2 minute failover time
+
+### HA Best Practices
+```
+Primary Instance (Zone A) ──> Synchronous Replication ──> Standby Instance (Zone B)
+                          ──> Connection String (single endpoint)
+```
+
+✅ Use **Cloud SQL Proxy** or **Private IP** for connections
+✅ Implement **connection pooling** to handle failover reconnections
+✅ Set appropriate **application timeouts** for failover scenarios
+✅ Use **exponential backoff** for connection retries
+❌ Don't use public IP for production workloads
+
+### Backup Strategy
+✅ Enable **automated backups** (daily, retention up to 365 days)
+✅ Set backup window during low-traffic periods
+✅ Enable **binary logging** (required for point-in-time recovery)
+✅ Configure appropriate **transaction log retention** (1-7 days)
+✅ Test restore procedures regularly
+✅ Use **on-demand backups** before major changes
+
+### Point-in-Time Recovery (PITR)
+```bash
+# Restore to specific timestamp
+gcloud sql backups create --instance=INSTANCE_NAME \
+  --recovery-time=2025-12-25T12:00:00Z
+```
+
+✅ Understand PITR limitations (within transaction log retention)
+✅ Document recovery time objectives (RTO) and recovery point objectives (RPO)
+✅ Keep binary logs for desired PITR window
+
+### Read Replicas
+✅ Use **read replicas** to offload read traffic from primary
+✅ Create replicas in same region for low latency
+✅ Use **cross-region replicas** for disaster recovery
+✅ Configure **replica lag monitoring** and alerting
+✅ Maximum 10 read replicas per instance
+
+### Replica Use Cases
+- **Load balancing**: Distribute read queries across replicas
+- **Reporting/Analytics**: Isolate heavy queries from production
+- **Disaster Recovery**: Cross-region failover capability
+- **Geographic distribution**: Serve users from closest region
+
+---
+
+## 3. Security Best Practices
+
+### Network Security
+✅ Use **Private IP** (VPC peering) for private connectivity
+✅ Avoid public IP unless absolutely necessary
+✅ Enable **authorized networks** if using public IP
+✅ Use **Cloud SQL Proxy** for secure connections
+✅ Implement **VPC Service Controls** for perimeter security
+
+### Authentication & Authorization
+✅ Use **Cloud SQL IAM authentication** (passwordless)
+✅ Implement **least privilege** for database users
+✅ Rotate passwords regularly for SQL authentication
+✅ Disable default 'root' or 'postgres' users
+✅ Create separate users for applications and administrators
+
+### IAM Roles
+- `roles/cloudsql.client`: Connect to instances via Cloud SQL Proxy
+- `roles/cloudsql.instanceUser`: IAM-based database login
+- `roles/cloudsql.editor`: Modify instance configuration
+- `roles/cloudsql.admin`: Full control over instances
+
+### Encryption
+✅ **At rest**: Automatic encryption with Google-managed keys
+✅ **CMEK**: Customer-managed encryption keys for compliance
+✅ **In transit**: SSL/TLS for all connections (enforce SSL)
+✅ **Client certificates**: Additional security layer
+
+### Enforce SSL Connections
+```sql
+-- MySQL: Require SSL for user
+ALTER USER 'myuser'@'%' REQUIRE SSL;
+
+-- PostgreSQL: Force SSL in pg_hba.conf
+-- hostssl all all 0.0.0.0/0 md5
+```
+
+### Audit & Compliance
+✅ Enable **audit logging** (PostgreSQL pgAudit, MySQL Enterprise Audit)
+✅ Enable **Cloud Logging** for connection logs
+✅ Monitor **failed login attempts**
+✅ Use **Cloud Audit Logs** for administrative operations
+✅ Implement **data access logging** for sensitive tables
+
+---
+
+## 4. Performance Optimization
+
+### Connection Management
+✅ Use **connection pooling** (reduces connection overhead)
+✅ Recommended pool size: (cores × 2) + effective_spindle_count
+✅ Set appropriate **connection timeouts**
+✅ Close connections properly to avoid leaks
+✅ Use **Cloud SQL Proxy** for connection management
+
+### Connection Pooling Configuration
+```python
+# Python example with SQLAlchemy
+engine = create_engine(
+    'postgresql+pg8000://user:pass@/dbname',
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=3600
+)
+```
+
+### Query Optimization
+✅ **Create appropriate indexes** on frequently queried columns
+✅ Use **EXPLAIN** to analyze query plans
+✅ Avoid **SELECT \*** (select only needed columns)
+✅ Use **prepared statements** to reduce parsing overhead
+✅ Implement **pagination** for large result sets
+✅ Optimize **JOIN operations** with proper indexing
+
+### Indexing Best Practices
+```sql
+-- Create index on frequently filtered columns
+CREATE INDEX idx_users_email ON users(email);
+
+-- Composite index for multi-column queries
+CREATE INDEX idx_orders_user_date ON orders(user_id, order_date);
+
+-- Partial index for specific conditions
+CREATE INDEX idx_active_users ON users(email) WHERE active = true;
+```
+
+✅ Monitor **unused indexes** (they slow down writes)
+✅ Use **covering indexes** for frequently accessed column sets
+✅ Avoid **over-indexing** (balance reads vs writes)
+✅ Regularly analyze and rebuild fragmented indexes
+
+### Query Performance Monitoring
+✅ Enable **Query Insights** for slow query identification
+✅ Set **slow query log threshold** appropriately
+✅ Use **pg_stat_statements** (PostgreSQL) for query analysis
+✅ Monitor **long-running queries** and kill if necessary
+✅ Review and optimize top N slowest queries regularly
+
+### Database Configuration Tuning
+
+#### MySQL Configuration
+```sql
+-- Buffer pool (70-80% of available memory)
+SET GLOBAL innodb_buffer_pool_size = 8589934592; -- 8GB
+
+-- Connection settings
+SET GLOBAL max_connections = 100;
+SET GLOBAL wait_timeout = 600;
+
+-- Query cache (use with caution)
+SET GLOBAL query_cache_size = 0; -- Disabled in MySQL 8.0+
+```
+
+#### PostgreSQL Configuration
+```sql
+-- Shared buffers (25% of memory)
+ALTER SYSTEM SET shared_buffers = '2GB';
+
+-- Work memory (for sorting/hashing)
+ALTER SYSTEM SET work_mem = '64MB';
+
+-- Effective cache size (50-75% of memory)
+ALTER SYSTEM SET effective_cache_size = '6GB';
+
+-- Reload configuration
+SELECT pg_reload_conf();
+```
+
+### Caching Strategies
+✅ Implement **application-level caching** (Redis, Memcached)
+✅ Use **query result caching** for frequently accessed data
+✅ Cache **computed values** and aggregations
+✅ Set appropriate **cache TTL** based on data freshness requirements
+✅ Invalidate cache on data updates
+
+---
+
+## 5. Maintenance & Updates
+
+### Maintenance Windows
+✅ Configure **maintenance window** during low-traffic periods
+✅ Understand that minor updates may cause brief unavailability
+✅ Enable **maintenance notifications** for advance warning
+✅ Test updates in non-production environments first
+✅ Review release notes before major version upgrades
+
+### Database Maintenance Tasks
+✅ **VACUUM** (PostgreSQL): Reclaim storage, update statistics
+✅ **ANALYZE**: Update query planner statistics
+✅ **REINDEX**: Rebuild fragmented indexes
+✅ **OPTIMIZE TABLE** (MySQL): Defragment tables
+✅ Schedule maintenance during off-peak hours
+
+### Version Management
+✅ Keep database version up-to-date for security patches
+✅ Test **major version upgrades** in staging first
+✅ Review **compatibility changes** before upgrading
+✅ Plan downtime for major upgrades (or use read replicas)
+✅ Take backup before any major changes
+
+---
+
+## 6. Monitoring & Alerting
+
+### Key Metrics to Monitor
+✅ **CPU utilization**: Alert at 80%+
+✅ **Memory utilization**: Alert at 85%+
+✅ **Disk utilization**: Alert at 80%+, enable auto-increase
+✅ **IOPS and throughput**: Monitor against limits
+✅ **Connection count**: Alert at 90% of max_connections
+✅ **Replication lag**: Alert at 5+ seconds
+✅ **Slow queries**: Track queries > 1 second
+✅ **Error rates**: 5xx errors, failed connections
+
+### Cloud Monitoring Setup
+```bash
+# Example alert policy for CPU
+gcloud alpha monitoring policies create \
+  --notification-channels=CHANNEL_ID \
+  --display-name="High CPU Alert" \
+  --condition-display-name="CPU > 80%" \
+  --condition-threshold-value=0.8 \
+  --condition-threshold-duration=300s
+```
+
+### Logging Best Practices
+✅ Enable **error logs** (always on)
+✅ Enable **slow query logs** (set appropriate threshold)
+✅ Enable **general logs** only for troubleshooting (high overhead)
+✅ Export logs to **Cloud Logging** for centralized management
+✅ Set log retention policies appropriately
+
+### Dashboard Essentials
+- Instance health and availability
+- CPU, memory, disk, network utilization
+- Active connections and connection pool status
+- Query performance (avg query time, slow queries)
+- Replication lag (for HA and read replicas)
+- Backup status and age of last backup
+
+---
+
+## 7. Cost Optimization
+
+### Right-Sizing Strategies
+✅ Monitor actual resource usage over time
+✅ **Downsize** over-provisioned instances
+✅ Use **shared-core** instances for dev/test
+✅ Schedule **instance stop/start** for non-production
+✅ Delete unused instances and replicas
+
+### Storage Optimization
+✅ Enable **automatic storage increase** to avoid manual resizing fees
+✅ Archive old data to **Cloud Storage** for cheaper storage
+✅ Implement **data retention policies** to delete old data
+✅ Use **table partitioning** for efficient archival
+✅ Monitor storage growth trends
+
+### Backup Cost Management
+✅ Set appropriate **backup retention** (7-35 days typical)
+✅ Longer retention = higher costs
+✅ Delete old **on-demand backups** no longer needed
+✅ Consider exporting to Cloud Storage for long-term archival
+
+### Network Cost Reduction
+✅ Use **Private IP** to avoid egress charges within VPC
+✅ Keep instances and compute in **same region**
+✅ Use **read replicas** in same region as clients
+✅ Minimize cross-region data transfer
+
+### Reserved Capacity
+✅ Use **committed use discounts** for predictable workloads (1 or 3 years)
+✅ Save up to 52% for 3-year commitments
+✅ Evaluate cost savings vs flexibility tradeoff
+
+---
+
+## 8. Migration Best Practices
+
+### Migration Planning
+✅ **Assess** current database (size, schema, dependencies)
+✅ Choose appropriate **migration strategy** (online vs offline)
+✅ Test migration in **staging environment** first
+✅ Plan for **rollback** in case of issues
+✅ Communicate downtime windows to stakeholders
+
+### Migration Methods
+
+#### Database Migration Service (DMS)
+✅ **Online migration**: Minimal downtime using CDC
+✅ Supports **MySQL, PostgreSQL, SQL Server, Oracle**
+✅ Continuous replication during migration
+✅ Switchover when cutover ready
+
+#### Manual Migration
+```bash
+# Export from source
+mysqldump -u user -p --databases mydb > dump.sql
+
+# Import to Cloud SQL
+gcloud sql import sql INSTANCE_NAME gs://BUCKET/dump.sql \
+  --database=mydb
+
+# Or use Cloud SQL proxy
+mysql -h 127.0.0.1 -u user -p mydb < dump.sql
+```
+
+### Pre-Migration Checklist
+- [ ] Backup source database
+- [ ] Test connectivity to Cloud SQL
+- [ ] Verify schema compatibility
+- [ ] Check for deprecated features
+- [ ] Identify and resolve potential blockers
+- [ ] Plan for character set/collation differences
+- [ ] Test application with Cloud SQL instance
+- [ ] Prepare rollback plan
+
+### Post-Migration Tasks
+✅ Verify data integrity (row counts, checksums)
+✅ Update **application connection strings**
+✅ Test application functionality thoroughly
+✅ Monitor performance and optimize as needed
+✅ Update **database statistics** (ANALYZE)
+✅ Rebuild indexes if necessary
+✅ Implement ongoing backup strategy
+
+---
+
+## 9. Application Integration
+
+### Connection Best Practices
+✅ Use **Cloud SQL Proxy** for secure, managed connections
+✅ Implement **connection pooling** at application layer
+✅ Use **Private IP** for VPC-native applications
+✅ Handle **transient failures** with retry logic
+✅ Set appropriate **connection timeouts**
+
+### Cloud SQL Proxy Setup
+```bash
+# Download and run proxy
+cloud_sql_proxy -instances=PROJECT:REGION:INSTANCE=tcp:3306 &
+
+# Connect through proxy
+mysql -h 127.0.0.1 -u myuser -p mydatabase
+```
+
+### Application Code Best Practices
+```python
+# Python example with connection pooling
+import sqlalchemy
+from google.cloud.sql.connector import Connector
+
+connector = Connector()
+
+def getconn():
+    return connector.connect(
+        "project:region:instance",
+        "pg8000",
+        user="myuser",
+        password="mypassword",
+        db="mydb"
+    )
+
+pool = sqlalchemy.create_engine(
+    "postgresql+pg8000://",
+    creator=getconn,
+    pool_size=5,
+    max_overflow=2,
+    pool_timeout=30,
+    pool_recycle=1800
+)
+```
+
+### Error Handling
+✅ Catch and handle **database exceptions** gracefully
+✅ Implement **exponential backoff** for retries
+✅ Log errors with sufficient context
+✅ Differentiate **transient vs permanent** failures
+✅ Fail gracefully with user-friendly messages
+
+---
+
+## 10. Serverless & Cloud Run Integration
+
+### Cloud Run to Cloud SQL
+✅ Use **Cloud SQL Proxy sidecar** or **Unix socket**
+✅ Configure **instance connection name** in Cloud Run
+✅ Use **Secret Manager** for database credentials
+✅ Set **connection limits** appropriate for Cloud Run concurrency
+✅ Handle **cold starts** with connection pooling
+
+### Cloud Functions Integration
+✅ Use **connection pooling** across function invocations
+✅ Reuse connections in **global scope**
+✅ Set **max instances** to avoid overwhelming database
+✅ Consider **connection limits** per function instance
+
+---
+
+## 11. Compliance & Governance
+
+### Data Residency
+✅ Choose **region** based on compliance requirements
+✅ Use **regional instances** for data locality
+✅ Implement **Organization Policies** to restrict regions
+✅ Document data location for auditors
+
+### Compliance Standards
+✅ **HIPAA**: Enable encryption, audit logs, BAA with Google
+✅ **PCI DSS**: Network isolation, encryption, access controls
+✅ **GDPR**: Data encryption, right to deletion, audit trails
+✅ **SOC 2/3**: Audit logs, access controls, monitoring
+
+### Access Control
+✅ Implement **least privilege** access
+✅ Use **IAM** for instance management
+✅ Use **database users/roles** for data access
+✅ Regular **access reviews** and audits
+✅ Separate **admin and application accounts**
+
+---
+
+## 12. Common Anti-Patterns to Avoid
+
+❌ **Using public IP for production**: Security and performance risks
+❌ **Not using connection pooling**: Connection overhead and exhaustion
+❌ **Ignoring slow queries**: Performance degradation over time
+❌ **Over-provisioning**: Wasting money on unused capacity
+❌ **Not enabling HA for production**: Single point of failure
+❌ **Storing large BLOBs in database**: Use Cloud Storage instead
+❌ **Not monitoring replica lag**: Stale reads from replicas
+❌ **Running analytics on production**: Use read replicas or export to BigQuery
+❌ **Not testing failover**: Surprises during actual incidents
+❌ **Hardcoding credentials**: Use Secret Manager or IAM auth
+❌ **Not implementing backups**: Data loss risk
+❌ **Ignoring maintenance windows**: Unexpected downtime
+
+---
+
+## 13. Troubleshooting Guide
+
+### High CPU Usage
+1. Check for missing indexes
+2. Identify slow queries using Query Insights
+3. Look for full table scans
+4. Check for lock contention
+5. Consider scaling up or optimizing queries
+
+### High Memory Usage
+1. Review buffer pool configuration
+2. Check for memory leaks in connections
+3. Identify queries with large result sets
+4. Consider increasing instance memory
+
+### Connection Issues
+1. Verify network connectivity (VPC peering, firewall rules)
+2. Check authorized networks (if using public IP)
+3. Verify connection limits not exceeded
+4. Check Cloud SQL Proxy configuration
+5. Review IAM permissions
+
+### Slow Queries
+1. Use EXPLAIN to analyze query plans
+2. Check for missing indexes
+3. Review table statistics freshness
+4. Look for lock contention
+5. Consider query rewriting or schema changes
+
+### Replication Lag
+1. Check network connectivity between zones
+2. Identify long-running transactions on primary
+3. Review write workload intensity
+4. Consider scaling up replica instance
+5. Check for DDL operations blocking replication
+
+---
+
+## Quick Reference Checklist
+
+- [ ] Choose appropriate machine type and storage
+- [ ] Enable Regional HA for production instances
+- [ ] Configure automated backups with appropriate retention
+- [ ] Enable binary logging for PITR
+- [ ] Use Private IP and Cloud SQL Proxy
+- [ ] Implement connection pooling
+- [ ] Enable SSL/TLS enforcement
+- [ ] Use IAM authentication where possible
+- [ ] Create appropriate indexes
+- [ ] Enable Query Insights
+- [ ] Configure monitoring and alerting
+- [ ] Set maintenance window during off-peak hours
+- [ ] Test failover procedures
+- [ ] Implement cost optimization strategies
+- [ ] Enable audit logging for compliance
+- [ ] Document backup and recovery procedures
+- [ ] Use read replicas for load distribution
+- [ ] Right-size instances based on actual usage
+
+---
+
+## Additional Resources
+
+- [Cloud SQL Documentation](https://cloud.google.com/sql/docs)
+- [Best Practices for Cloud SQL](https://cloud.google.com/sql/docs/postgres/best-practices)
+- [Query Insights](https://cloud.google.com/sql/docs/postgres/using-query-insights)
+- [Cloud SQL Proxy](https://cloud.google.com/sql/docs/mysql/sql-proxy)
+- [Pricing Calculator](https://cloud.google.com/products/calculator)
+
+---
+
+*Last Updated: December 25, 2025*
