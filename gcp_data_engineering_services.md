@@ -126,6 +126,10 @@
 - De-identification of sensitive information
 - Compliance support (GDPR, HIPAA, etc.)
 
+### 7.1 **Bigquery Omni**
+
+### 7.2 **Bigquery Biglake**
+
 ## Machine Learning & AI Integration
 
 ### 21. **Vertex AI**
