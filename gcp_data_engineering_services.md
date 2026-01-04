@@ -38,6 +38,13 @@
 - Sub-millisecond latency
 - Session management and caching
 
+### 6.1 **AlloyDB**
+- Fully managed PostgreSQL-compatible database
+- 100x faster analytics queries with columnar engine
+- Designed for demanding transactional and analytical workloads
+- High availability with automatic failover and cross-region replicas
+- Enterprise-grade performance and scale
+
 ## Data Processing & Analytics
 
 ### 7. **BigQuery**
