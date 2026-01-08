@@ -1446,7 +1446,1294 @@ ORDER BY
 
 ---
 
-## 13. Quick Reference Checklist
+## 13. Explainable AI (XAI)
+
+### Feature Attributions
+
+**Best Practices:**
+- Enable explanations for model predictions
+- Use appropriate explanation methods
+- Visualize feature importance
+- Document explanation methodology
+
+```python
+from google.cloud.aiplatform import explain
+
+def deploy_model_with_explanations(
+    model,
+    endpoint_display_name,
+    explanation_metadata,
+    explanation_parameters
+):
+    """Deploy model with explanation configuration."""
+    
+    # Create endpoint
+    endpoint = aiplatform.Endpoint.create(
+        display_name=endpoint_display_name,
+        labels={'explainable': 'true'}
+    )
+    
+    # Deploy with explanations enabled
+    model.deploy(
+        endpoint=endpoint,
+        deployed_model_display_name=f'{model.display_name}-explained',
+        machine_type='n1-standard-4',
+        min_replica_count=1,
+        max_replica_count=3,
+        explanation_metadata=explanation_metadata,
+        explanation_parameters=explanation_parameters,
+        sync=True,
+    )
+    
+    return endpoint
+
+# Configure explanations
+explanation_metadata = aiplatform.explain.ExplanationMetadata(
+    inputs={
+        'age': {'input_tensor_name': 'age'},
+        'income': {'input_tensor_name': 'income'},
+        'tenure_months': {'input_tensor_name': 'tenure_months'},
+        'product_category': {'input_tensor_name': 'product_category'},
+    },
+    outputs={
+        'prediction': {'output_tensor_name': 'prediction'}
+    }
+)
+
+explanation_parameters = aiplatform.explain.ExplanationParameters(
+    {
+        'sampled_shapley_attribution': {
+            'path_count': 10
+        }
+    }
+)
+
+# Alternative: Integrated Gradients
+explanation_parameters_ig = aiplatform.explain.ExplanationParameters(
+    {
+        'integrated_gradients_attribution': {
+            'step_count': 50,
+            'smooth_grad_config': {
+                'noise_sigma': 0.1,
+                'noisy_sample_count': 10
+            }
+        }
+    }
+)
+
+# Deploy with explanations
+endpoint = deploy_model_with_explanations(
+    model=model,
+    endpoint_display_name='explainable-model-endpoint',
+    explanation_metadata=explanation_metadata,
+    explanation_parameters=explanation_parameters
+)
+```
+
+### Understanding Explanations
+
+**Interpret Feature Attributions:**
+```python
+def get_predictions_with_explanations(endpoint, instances):
+    """Get predictions with detailed explanations."""
+    
+    response = endpoint.explain(instances=instances)
+    
+    for idx, (prediction, explanation) in enumerate(zip(response.predictions, response.explanations)):
+        print(f"\n=== Instance {idx + 1} ===")
+        print(f"Prediction: {prediction}")
+        
+        # Get feature attributions
+        if explanation.attributions:
+            print("\nFeature Attributions:")
+            attributions = explanation.attributions[0]
+            
+            # Sort by absolute attribution value
+            feature_attributions = []
+            for feature_name, attribution in attributions.feature_attributions.items():
+                feature_attributions.append((feature_name, attribution))
+            
+            feature_attributions.sort(key=lambda x: abs(x[1]), reverse=True)
+            
+            # Display top features
+            for feature_name, attribution in feature_attributions[:10]:
+                direction = "↑" if attribution > 0 else "↓"
+                print(f"  {direction} {feature_name}: {attribution:.4f}")
+    
+    return response
+
+# Example usage
+instances = [
+    {'age': 35, 'income': 75000, 'tenure_months': 24, 'product_category': 'premium'}
+]
+
+explanations = get_predictions_with_explanations(endpoint, instances)
+```
+
+### Visualization of Explanations
+
+**Create Explanation Visualizations:**
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+def visualize_feature_attributions(feature_names, attributions, title='Feature Attributions'):
+    """Visualize feature attributions as bar chart."""
+    
+    # Sort features by absolute attribution
+    sorted_indices = np.argsort(np.abs(attributions))[::-1]
+    sorted_features = [feature_names[i] for i in sorted_indices]
+    sorted_attributions = [attributions[i] for i in sorted_indices]
+    
+    # Create bar chart
+    colors = ['green' if x > 0 else 'red' for x in sorted_attributions]
+    
+    plt.figure(figsize=(10, 6))
+    plt.barh(sorted_features[:15], sorted_attributions[:15], color=colors)
+    plt.xlabel('Attribution Value')
+    plt.title(title)
+    plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+    plt.tight_layout()
+    plt.savefig('feature_attributions.png')
+    plt.show()
+    
+    print(f"Visualization saved as 'feature_attributions.png'")
+```
+
+---
+
+## 14. Model Cards and Governance
+
+### Model Card Creation
+
+**Best Practices:**
+- Document model details
+- Include performance metrics
+- Describe limitations
+- Specify intended use cases
+
+```python
+from google.cloud import aiplatform
+
+def create_model_card(
+    model,
+    model_card_data
+):
+    """Create comprehensive model card."""
+    
+    model_card = {
+        'model_details': {
+            'name': model.display_name,
+            'version': model_card_data.get('version', '1.0'),
+            'description': model_card_data.get('description', ''),
+            'owners': model_card_data.get('owners', []),
+            'license': model_card_data.get('license', 'Proprietary'),
+            'references': model_card_data.get('references', []),
+        },
+        'model_parameters': {
+            'model_architecture': model_card_data.get('architecture', ''),
+            'input_format': model_card_data.get('input_format', {}),
+            'output_format': model_card_data.get('output_format', {}),
+        },
+        'considerations': {
+            'users': model_card_data.get('intended_users', []),
+            'use_cases': model_card_data.get('use_cases', []),
+            'limitations': model_card_data.get('limitations', []),
+            'tradeoffs': model_card_data.get('tradeoffs', []),
+        },
+        'training_data': {
+            'description': model_card_data.get('training_data_description', ''),
+            'size': model_card_data.get('training_data_size', 0),
+            'preprocessing': model_card_data.get('preprocessing_steps', []),
+        },
+        'evaluation_data': {
+            'description': model_card_data.get('eval_data_description', ''),
+            'size': model_card_data.get('eval_data_size', 0),
+        },
+        'metrics': model_card_data.get('metrics', {}),
+        'ethical_considerations': model_card_data.get('ethical_considerations', []),
+        'caveats_recommendations': model_card_data.get('caveats', []),
+    }
+    
+    # Save model card as metadata
+    model.update(
+        description=f"{model.description}\n\nModel Card: {model_card}",
+        labels={
+            **model.labels,
+            'has_model_card': 'true',
+            'version': model_card['model_details']['version']
+        }
+    )
+    
+    return model_card
+
+# Example model card
+model_card_data = {
+    'version': '1.0',
+    'description': 'Customer churn prediction model using Random Forest',
+    'owners': ['ML Team', 'ml-team@example.com'],
+    'license': 'Proprietary',
+    'architecture': 'Random Forest Classifier',
+    'intended_users': ['Business Analysts', 'Marketing Teams'],
+    'use_cases': ['Predict customer churn', 'Identify at-risk customers'],
+    'limitations': [
+        'Model trained on US data only',
+        'May not generalize to international customers',
+        'Requires minimum 6 months of customer history'
+    ],
+    'training_data_description': 'Historical customer data from 2022-2024',
+    'training_data_size': 500000,
+    'metrics': {
+        'accuracy': 0.87,
+        'precision': 0.85,
+        'recall': 0.82,
+        'f1_score': 0.83,
+        'auc_roc': 0.91
+    },
+    'ethical_considerations': [
+        'Potential bias in historical data',
+        'Regular monitoring for fairness required',
+        'Should not be sole factor in business decisions'
+    ],
+}
+
+model_card = create_model_card(model, model_card_data)
+```
+
+### Model Governance
+
+**Implement Governance Policies:**
+```python
+def implement_model_governance(project, location):
+    """Set up model governance policies."""
+    
+    aiplatform.init(project=project, location=location)
+    
+    # Define governance policies
+    governance_policies = {
+        'approval_required': True,
+        'reviewers': ['senior-ml-engineer@example.com', 'ml-lead@example.com'],
+        'performance_threshold': {
+            'accuracy': 0.80,
+            'auc_roc': 0.85,
+        },
+        'monitoring_required': True,
+        'documentation_required': True,
+        'bias_testing_required': True,
+    }
+    
+    return governance_policies
+
+def approve_model_for_production(model, approver_email, approval_notes):
+    """Approve model for production deployment."""
+    
+    # Add approval metadata
+    model.update(
+        labels={
+            **model.labels,
+            'production_approved': 'true',
+            'approved_by': approver_email.split('@')[0],
+            'approval_date': '2025-01-15'
+        },
+        description=f"{model.description}\n\nApproval Notes: {approval_notes}"
+    )
+    
+    print(f"Model approved for production by {approver_email}")
+    
+    return model
+```
+
+---
+
+## 15. Security Best Practices
+
+### IAM and Access Control
+
+**Best Practices:**
+- Use principle of least privilege
+- Separate service accounts by function
+- Implement VPC Service Controls
+- Enable audit logging
+
+```python
+def setup_secure_vertex_ai(project_id, service_account_email):
+    """Configure secure Vertex AI setup."""
+    
+    # Required IAM roles for different functions
+    iam_roles = {
+        'data_scientist': [
+            'roles/aiplatform.user',
+            'roles/storage.objectViewer',
+            'roles/bigquery.dataViewer',
+        ],
+        'ml_engineer': [
+            'roles/aiplatform.user',
+            'roles/aiplatform.serviceAgent',
+            'roles/storage.objectAdmin',
+            'roles/bigquery.dataEditor',
+        ],
+        'deployment_account': [
+            'roles/aiplatform.admin',
+            'roles/storage.objectAdmin',
+            'roles/iam.serviceAccountUser',
+        ],
+    }
+    
+    # Grant roles using gcloud
+    for role_type, roles in iam_roles.items():
+        print(f"\nRoles for {role_type}:")
+        for role in roles:
+            print(f"  - {role}")
+            print(f"    gcloud projects add-iam-policy-binding {project_id} \\")
+            print(f"      --member='serviceAccount:{service_account_email}' \\")
+            print(f"      --role='{role}'")
+    
+    return iam_roles
+
+# VPC Service Controls
+def configure_vpc_service_controls():
+    """Configure VPC Service Controls for Vertex AI."""
+    
+    vpc_config = {
+        'service_perimeter': 'vertex-ai-perimeter',
+        'restricted_services': [
+            'aiplatform.googleapis.com',
+            'storage.googleapis.com',
+            'bigquery.googleapis.com',
+        ],
+        'access_levels': [
+            'require_corp_network',
+            'require_device_policy',
+        ],
+        'ingress_policies': [
+            {
+                'from': 'allowed_projects',
+                'to': 'vertex_ai_operations',
+            }
+        ],
+    }
+    
+    print("VPC Service Controls Configuration:")
+    print(f"  Service Perimeter: {vpc_config['service_perimeter']}")
+    print(f"  Restricted Services: {', '.join(vpc_config['restricted_services'])}")
+    
+    return vpc_config
+
+# Example usage
+iam_config = setup_secure_vertex_ai(
+    project_id='my-project',
+    service_account_email='vertex-ai-sa@my-project.iam.gserviceaccount.com'
+)
+```
+
+### Data Encryption
+
+**Encryption at Rest and in Transit:**
+```python
+def create_encrypted_dataset(
+    display_name,
+    gcs_source,
+    encryption_spec_key_name,
+    project,
+    location
+):
+    """Create dataset with customer-managed encryption key."""
+    
+    aiplatform.init(project=project, location=location)
+    
+    # Create encryption spec
+    encryption_spec = aiplatform.gapic.EncryptionSpec(
+        kms_key_name=encryption_spec_key_name
+    )
+    
+    # Create dataset with encryption
+    dataset = aiplatform.TabularDataset.create(
+        display_name=display_name,
+        gcs_source=gcs_source,
+        encryption_spec=encryption_spec,
+        labels={'encrypted': 'true', 'compliance': 'required'}
+    )
+    
+    print(f"Encrypted dataset created: {dataset.resource_name}")
+    
+    return dataset
+
+def deploy_model_with_encryption(
+    model,
+    endpoint_display_name,
+    encryption_spec_key_name
+):
+    """Deploy model with encryption."""
+    
+    # Create encryption spec
+    encryption_spec = aiplatform.gapic.EncryptionSpec(
+        kms_key_name=encryption_spec_key_name
+    )
+    
+    # Create endpoint with encryption
+    endpoint = aiplatform.Endpoint.create(
+        display_name=endpoint_display_name,
+        encryption_spec=encryption_spec,
+        labels={'encrypted': 'true'}
+    )
+    
+    # Deploy model
+    model.deploy(
+        endpoint=endpoint,
+        machine_type='n1-standard-4',
+        min_replica_count=1,
+        max_replica_count=3,
+        sync=True,
+    )
+    
+    return endpoint
+
+# Example with CMEK
+kms_key = 'projects/my-project/locations/us-central1/keyRings/vertex-ai-keyring/cryptoKeys/vertex-ai-key'
+
+dataset = create_encrypted_dataset(
+    display_name='encrypted-dataset',
+    gcs_source=['gs://my-bucket/data/train.csv'],
+    encryption_spec_key_name=kms_key,
+    project='my-project',
+    location='us-central1'
+)
+```
+
+### Audit Logging
+
+**Enable and Monitor Audit Logs:**
+```python
+def setup_audit_logging(project_id):
+    """Configure audit logging for Vertex AI."""
+    
+    audit_config = {
+        'service': 'aiplatform.googleapis.com',
+        'audit_log_configs': [
+            {
+                'log_type': 'ADMIN_READ',
+                'exempted_members': [],
+            },
+            {
+                'log_type': 'DATA_READ',
+                'exempted_members': [],
+            },
+            {
+                'log_type': 'DATA_WRITE',
+                'exempted_members': [],
+            },
+        ],
+    }
+    
+    print("Audit Logging Configuration:")
+    print(f"  Service: {audit_config['service']}")
+    print(f"  Log Types: ADMIN_READ, DATA_READ, DATA_WRITE")
+    
+    return audit_config
+
+# Query audit logs in BigQuery
+def query_vertex_ai_audit_logs():
+    """Query Vertex AI audit logs."""
+    
+    query = """
+    SELECT
+        timestamp,
+        protoPayload.authenticationInfo.principalEmail AS user,
+        protoPayload.methodName AS method,
+        protoPayload.resourceName AS resource,
+        protoPayload.request AS request_details,
+        severity
+    FROM
+        `my-project.logs.cloudaudit_googleapis_com_activity_*`
+    WHERE
+        resource.type = 'aiplatform.googleapis.com/Model'
+        OR resource.type = 'aiplatform.googleapis.com/Endpoint'
+        OR resource.type = 'aiplatform.googleapis.com/TrainingPipeline'
+    ORDER BY
+        timestamp DESC
+    LIMIT 100;
+    """
+    
+    return query
+```
+
+---
+
+## 16. Performance Optimization
+
+### Model Optimization Techniques
+
+**Best Practices:**
+- Use model quantization
+- Implement model pruning
+- Optimize inference batch size
+- Use TensorFlow Lite for edge deployment
+
+```python
+import tensorflow as tf
+
+def optimize_tensorflow_model(saved_model_path, optimized_model_path):
+    """Optimize TensorFlow model for inference."""
+    
+    # Load model
+    model = tf.saved_model.load(saved_model_path)
+    
+    # Convert to TFLite with optimization
+    converter = tf.lite.TFLiteConverter.from_saved_model(saved_model_path)
+    
+    # Enable optimizations
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    
+    # Quantization
+    converter.target_spec.supported_types = [tf.float16]
+    
+    # Convert
+    tflite_model = converter.convert()
+    
+    # Save optimized model
+    with open(f'{optimized_model_path}/model.tflite', 'wb') as f:
+        f.write(tflite_model)
+    
+    print(f"Optimized model saved to {optimized_model_path}")
+    
+    # Compare sizes
+    import os
+    original_size = sum(
+        os.path.getsize(os.path.join(dirpath, filename))
+        for dirpath, dirnames, filenames in os.walk(saved_model_path)
+        for filename in filenames
+    )
+    optimized_size = os.path.getsize(f'{optimized_model_path}/model.tflite')
+    
+    print(f"Original model size: {original_size / 1024 / 1024:.2f} MB")
+    print(f"Optimized model size: {optimized_size / 1024 / 1024:.2f} MB")
+    print(f"Reduction: {(1 - optimized_size / original_size) * 100:.2f}%")
+
+def quantize_model_for_deployment(model_path, quantization_type='dynamic'):
+    """Apply quantization to model."""
+    
+    converter = tf.lite.TFLiteConverter.from_saved_model(model_path)
+    
+    if quantization_type == 'dynamic':
+        # Dynamic range quantization (easiest)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    
+    elif quantization_type == 'float16':
+        # Float16 quantization
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        converter.target_spec.supported_types = [tf.float16]
+    
+    elif quantization_type == 'int8':
+        # Int8 quantization (requires representative dataset)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        converter.inference_input_type = tf.int8
+        converter.inference_output_type = tf.int8
+    
+    tflite_model = converter.convert()
+    
+    return tflite_model
+```
+
+### Batch Prediction Optimization
+
+**Optimize Batch Inference:**
+```python
+def optimize_batch_prediction(
+    model,
+    input_data,
+    batch_size=32,
+    use_gpu=True
+):
+    """Optimize batch prediction configuration."""
+    
+    # Calculate optimal batch size based on data size
+    total_instances = len(input_data)
+    optimal_batch_size = min(batch_size, total_instances // 10)
+    
+    # Calculate optimal number of replicas
+    if total_instances < 1000:
+        num_replicas = 1
+        machine_type = 'n1-standard-4'
+    elif total_instances < 10000:
+        num_replicas = 2
+        machine_type = 'n1-standard-8'
+    else:
+        num_replicas = 5
+        machine_type = 'n1-highmem-8'
+    
+    # Configure batch prediction
+    config = {
+        'machine_type': machine_type,
+        'starting_replica_count': num_replicas,
+        'max_replica_count': num_replicas * 2,
+        'batch_size': optimal_batch_size,
+        'accelerator_type': 'NVIDIA_TESLA_T4' if use_gpu else None,
+        'accelerator_count': 1 if use_gpu else 0,
+    }
+    
+    print(f"Optimized Batch Prediction Config:")
+    print(f"  Instances: {total_instances}")
+    print(f"  Batch Size: {optimal_batch_size}")
+    print(f"  Machine Type: {machine_type}")
+    print(f"  Replicas: {num_replicas}")
+    
+    return config
+```
+
+### Caching Strategies
+
+**Implement Prediction Caching:**
+```python
+from google.cloud import redis
+import hashlib
+import json
+
+class PredictionCache:
+    """Cache predictions to reduce inference costs."""
+    
+    def __init__(self, redis_host, redis_port):
+        self.client = redis.Client(host=redis_host, port=redis_port)
+        self.ttl = 3600  # 1 hour
+    
+    def get_cache_key(self, instance):
+        """Generate cache key from instance."""
+        instance_str = json.dumps(instance, sort_keys=True)
+        return hashlib.md5(instance_str.encode()).hexdigest()
+    
+    def get_prediction(self, instance):
+        """Get prediction from cache."""
+        key = self.get_cache_key(instance)
+        cached = self.client.get(key)
+        
+        if cached:
+            return json.loads(cached)
+        return None
+    
+    def set_prediction(self, instance, prediction):
+        """Store prediction in cache."""
+        key = self.get_cache_key(instance)
+        self.client.setex(
+            key,
+            self.ttl,
+            json.dumps(prediction)
+        )
+    
+    def predict_with_cache(self, endpoint, instance):
+        """Get prediction with caching."""
+        # Check cache first
+        cached_prediction = self.get_prediction(instance)
+        if cached_prediction:
+            print("Cache hit!")
+            return cached_prediction
+        
+        # Get prediction from endpoint
+        print("Cache miss - calling endpoint")
+        prediction = endpoint.predict([instance])
+        
+        # Store in cache
+        self.set_prediction(instance, prediction.predictions[0])
+        
+        return prediction.predictions[0]
+
+# Usage
+cache = PredictionCache(
+    redis_host='10.0.0.3',
+    redis_port=6379
+)
+
+instance = {'age': 35, 'income': 75000}
+prediction = cache.predict_with_cache(endpoint, instance)
+```
+
+---
+
+## 17. Integration Patterns
+
+### BigQuery Integration
+
+**Best Practices:**
+- Use BigQuery for feature engineering
+- Store predictions in BigQuery
+- Query historical predictions
+
+```python
+from google.cloud import bigquery
+
+def create_features_from_bigquery(
+    project,
+    location,
+    query,
+    destination_table
+):
+    """Create features from BigQuery query."""
+    
+    bq_client = bigquery.Client(project=project, location=location)
+    
+    # Run feature engineering query
+    job_config = bigquery.QueryJobConfig(
+        destination=destination_table,
+        write_disposition='WRITE_TRUNCATE',
+    )
+    
+    query_job = bq_client.query(query, job_config=job_config)
+    query_job.result()
+    
+    print(f"Features created in {destination_table}")
+    
+    return destination_table
+
+def export_predictions_to_bigquery(
+    predictions,
+    project,
+    dataset,
+    table_name
+):
+    """Export predictions to BigQuery."""
+    
+    bq_client = bigquery.Client(project=project)
+    
+    table_id = f"{project}.{dataset}.{table_name}"
+    
+    # Define schema
+    schema = [
+        bigquery.SchemaField("prediction_id", "STRING"),
+        bigquery.SchemaField("prediction_value", "FLOAT64"),
+        bigquery.SchemaField("prediction_timestamp", "TIMESTAMP"),
+        bigquery.SchemaField("model_version", "STRING"),
+    ]
+    
+    # Create table if not exists
+    table = bigquery.Table(table_id, schema=schema)
+    table = bq_client.create_table(table, exists_ok=True)
+    
+    # Insert predictions
+    errors = bq_client.insert_rows_json(table, predictions)
+    
+    if errors:
+        print(f"Errors inserting rows: {errors}")
+    else:
+        print(f"Predictions exported to {table_id}")
+
+# Feature engineering query example
+feature_query = """
+WITH customer_features AS (
+    SELECT
+        customer_id,
+        DATE_DIFF(CURRENT_DATE(), first_purchase_date, DAY) AS days_since_first_purchase,
+        COUNT(DISTINCT order_id) AS total_orders,
+        SUM(order_amount) AS total_spent,
+        AVG(order_amount) AS avg_order_value,
+        MAX(order_date) AS last_order_date,
+        DATE_DIFF(CURRENT_DATE(), MAX(order_date), DAY) AS days_since_last_order
+    FROM
+        `my-project.analytics.orders`
+    GROUP BY
+        customer_id, first_purchase_date
+)
+SELECT
+    c.*,
+    f.*
+FROM
+    `my-project.analytics.customers` c
+JOIN
+    customer_features f
+ON
+    c.customer_id = f.customer_id;
+"""
+
+features_table = create_features_from_bigquery(
+    project='my-project',
+    location='us-central1',
+    query=feature_query,
+    destination_table='my-project.ml_features.customer_features'
+)
+```
+
+### Cloud Functions Integration
+
+**Trigger Predictions from Events:**
+```python
+import functions_framework
+from google.cloud import aiplatform
+
+@functions_framework.http
+def predict_on_request(request):
+    """Cloud Function to handle prediction requests."""
+    
+    # Initialize Vertex AI
+    aiplatform.init(
+        project='my-project',
+        location='us-central1'
+    )
+    
+    # Get endpoint
+    endpoint = aiplatform.Endpoint('projects/123/locations/us-central1/endpoints/456')
+    
+    # Get request data
+    request_json = request.get_json()
+    instances = request_json.get('instances', [])
+    
+    # Make prediction
+    predictions = endpoint.predict(instances=instances)
+    
+    # Return response
+    return {
+        'predictions': predictions.predictions,
+        'model_version': 'v1.0',
+        'timestamp': '2025-01-15T10:30:00Z'
+    }
+
+@functions_framework.cloud_event
+def predict_on_pubsub(cloud_event):
+    """Trigger predictions from Pub/Sub messages."""
+    
+    import base64
+    
+    # Decode Pub/Sub message
+    pubsub_message = base64.b64decode(cloud_event.data["message"]["data"])
+    message_data = json.loads(pubsub_message)
+    
+    # Initialize Vertex AI
+    aiplatform.init(project='my-project', location='us-central1')
+    
+    # Get endpoint
+    endpoint = aiplatform.Endpoint('projects/123/locations/us-central1/endpoints/456')
+    
+    # Make prediction
+    prediction = endpoint.predict(instances=[message_data])
+    
+    # Publish results
+    from google.cloud import pubsub_v1
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path('my-project', 'prediction-results')
+    
+    result_data = json.dumps({
+        'input': message_data,
+        'prediction': prediction.predictions[0],
+        'timestamp': '2025-01-15T10:30:00Z'
+    })
+    
+    publisher.publish(topic_path, result_data.encode('utf-8'))
+```
+
+### Dataflow Integration
+
+**Batch Processing with Dataflow:**
+```python
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+from google.cloud import aiplatform
+
+class PredictDoFn(beam.DoFn):
+    """DoFn for making predictions in Dataflow."""
+    
+    def __init__(self, project, location, endpoint_id):
+        self.project = project
+        self.location = location
+        self.endpoint_id = endpoint_id
+        self.endpoint = None
+    
+    def setup(self):
+        """Initialize endpoint once per worker."""
+        aiplatform.init(project=self.project, location=self.location)
+        self.endpoint = aiplatform.Endpoint(self.endpoint_id)
+    
+    def process(self, element):
+        """Make prediction for element."""
+        prediction = self.endpoint.predict(instances=[element])
+        
+        yield {
+            'input': element,
+            'prediction': prediction.predictions[0],
+        }
+
+def run_dataflow_predictions(
+    input_pattern,
+    output_table,
+    project,
+    location,
+    endpoint_id
+):
+    """Run batch predictions using Dataflow."""
+    
+    options = PipelineOptions([
+        f'--project={project}',
+        f'--region={location}',
+        '--runner=DataflowRunner',
+        '--temp_location=gs://my-bucket/temp',
+        '--staging_location=gs://my-bucket/staging',
+    ])
+    
+    with beam.Pipeline(options=options) as pipeline:
+        (
+            pipeline
+            | 'Read Input' >> beam.io.ReadFromText(input_pattern)
+            | 'Parse JSON' >> beam.Map(json.loads)
+            | 'Predict' >> beam.ParDo(PredictDoFn(project, location, endpoint_id))
+            | 'Write to BigQuery' >> beam.io.WriteToBigQuery(
+                output_table,
+                schema='input:STRING,prediction:FLOAT64',
+                write_disposition=beam.io.BigQueryDisposition.WRITE_APPEND
+            )
+        )
+```
+
+---
+
+## 18. Troubleshooting Guide
+
+### Common Issues and Solutions
+
+#### Issue 1: Training Job Fails
+
+**Symptoms:**
+- Training job fails with resource errors
+- Out of memory errors
+
+**Solutions:**
+```python
+# Solution 1: Increase machine resources
+model = job.run(
+    replica_count=1,
+    machine_type='n1-highmem-16',  # More memory
+    accelerator_type='NVIDIA_TESLA_V100',  # Better GPU
+    accelerator_count=2,
+)
+
+# Solution 2: Reduce batch size in training script
+# training_args = {
+#     'batch_size': 16,  # Reduce from 32
+#     'gradient_accumulation_steps': 2,
+# }
+
+# Solution 3: Enable gradient checkpointing
+# model.gradient_checkpointing_enable()
+```
+
+#### Issue 2: Slow Predictions
+
+**Symptoms:**
+- High prediction latency
+- Timeouts
+
+**Solutions:**
+```python
+# Solution 1: Scale up endpoint
+endpoint.update(
+    min_replica_count=3,  # Increase minimum replicas
+    max_replica_count=10,
+)
+
+# Solution 2: Use GPU for inference
+model.deploy(
+    endpoint=endpoint,
+    machine_type='n1-standard-4',
+    accelerator_type='NVIDIA_TESLA_T4',
+    accelerator_count=1,
+)
+
+# Solution 3: Batch predictions
+# Instead of: predictions = [endpoint.predict([x]) for x in instances]
+# Use: predictions = endpoint.predict(instances)  # Batch all together
+```
+
+#### Issue 3: Model Accuracy Degradation
+
+**Symptoms:**
+- Model performance drops over time
+- Increased prediction errors
+
+**Solutions:**
+```python
+# Solution 1: Set up monitoring
+monitoring_job = create_model_monitoring_job(
+    endpoint=endpoint,
+    display_name='model-monitoring',
+    emails=['ml-team@example.com'],
+    drift_thresholds={'feature_1': 0.1, 'feature_2': 0.1},
+)
+
+# Solution 2: Retrain model regularly
+def schedule_retraining():
+    """Schedule model retraining."""
+    from google.cloud import scheduler_v1
+    
+    client = scheduler_v1.CloudSchedulerClient()
+    
+    job = {
+        'name': 'projects/my-project/locations/us-central1/jobs/retrain-model',
+        'schedule': '0 0 * * 0',  # Weekly on Sunday
+        'http_target': {
+            'uri': 'https://my-function-url.cloudfunctions.net/retrain',
+            'http_method': 'POST',
+        },
+    }
+    
+    return job
+
+# Solution 3: Implement A/B testing
+new_model.deploy(
+    endpoint=endpoint,
+    traffic_percentage=10,  # Send 10% traffic to new model
+)
+```
+
+#### Issue 4: High Costs
+
+**Symptoms:**
+- Unexpected billing charges
+- Resource over-provisioning
+
+**Solutions:**
+```python
+# Solution 1: Use auto-scaling efficiently
+model.deploy(
+    endpoint=endpoint,
+    min_replica_count=1,  # Reduce minimum
+    max_replica_count=5,  # Set reasonable maximum
+    machine_type='n1-standard-4',  # Right-size machines
+)
+
+# Solution 2: Clean up unused resources
+def cleanup_unused_resources(project, location, days_old=30):
+    """Delete unused models and endpoints."""
+    aiplatform.init(project=project, location=location)
+    
+    import datetime
+    cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_old)
+    
+    # List and delete old models
+    models = aiplatform.Model.list()
+    for model in models:
+        if model.create_time < cutoff_date:
+            # Check if model is deployed
+            if not model.gca_resource.deployed_models:
+                print(f"Deleting unused model: {model.display_name}")
+                model.delete()
+    
+    # List and delete unused endpoints
+    endpoints = aiplatform.Endpoint.list()
+    for endpoint in endpoints:
+        if not endpoint.gca_resource.deployed_models:
+            print(f"Deleting empty endpoint: {endpoint.display_name}")
+            endpoint.delete()
+
+# Solution 3: Use batch prediction instead of online
+batch_job = model.batch_predict(
+    gcs_source='gs://my-bucket/input.jsonl',
+    gcs_destination_prefix='gs://my-bucket/output/',
+)
+```
+
+### Debugging Tools
+
+**Enable Detailed Logging:**
+```python
+import logging
+from google.cloud import logging as cloud_logging
+
+# Setup Cloud Logging
+logging_client = cloud_logging.Client()
+logging_client.setup_logging(log_level=logging.DEBUG)
+
+# Log training details
+logger = logging.getLogger('vertex-ai-training')
+logger.setLevel(logging.DEBUG)
+
+def log_training_progress(epoch, loss, accuracy):
+    """Log training progress."""
+    logger.info(f"Epoch {epoch}: Loss={loss:.4f}, Accuracy={accuracy:.4f}")
+
+# View logs
+def query_vertex_logs(project_id, hours=24):
+    """Query recent Vertex AI logs."""
+    
+    query = f"""
+    resource.type="aiplatform.googleapis.com/TrainingJob"
+    timestamp >= "{hours}h"
+    """
+    
+    entries = logging_client.list_entries(filter_=query, max_results=100)
+    
+    for entry in entries:
+        print(f"{entry.timestamp}: {entry.payload}")
+    
+    return entries
+```
+
+---
+
+## 19. Advanced Topics
+
+### Custom Prediction Routines
+
+**Implement Custom Preprocessing:**
+```python
+from google.cloud.aiplatform.prediction import LocalModel
+from google.cloud.aiplatform.prediction.handler import PredictionHandler
+import pickle
+
+class CustomHandler(PredictionHandler):
+    """Custom prediction handler with preprocessing."""
+    
+    def __init__(self):
+        pass
+    
+    def load(self, artifacts_uri):
+        """Load model and preprocessing artifacts."""
+        # Load model
+        with open(f'{artifacts_uri}/model.pkl', 'rb') as f:
+            self.model = pickle.load(f)
+        
+        # Load preprocessor
+        with open(f'{artifacts_uri}/preprocessor.pkl', 'rb') as f:
+            self.preprocessor = pickle.load(f)
+    
+    def preprocess(self, prediction_input):
+        """Custom preprocessing logic."""
+        instances = prediction_input.instances
+        
+        # Apply preprocessing
+        processed = self.preprocessor.transform(instances)
+        
+        return processed
+    
+    def predict(self, instances):
+        """Make predictions."""
+        predictions = self.model.predict(instances)
+        return predictions
+    
+    def postprocess(self, prediction_results):
+        """Custom postprocessing logic."""
+        # Add confidence scores, thresholds, etc.
+        processed_results = []
+        
+        for pred in prediction_results:
+            processed_results.append({
+                'prediction': pred,
+                'confidence': abs(pred),
+                'threshold': 0.5,
+            })
+        
+        return processed_results
+
+# Deploy custom prediction routine
+def deploy_custom_prediction_routine(
+    model_artifacts_uri,
+    handler_class,
+    requirements
+):
+    """Deploy model with custom prediction routine."""
+    
+    local_model = LocalModel.build_cpr_model(
+        model_artifacts_uri,
+        'us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-0:latest',
+        handler_class=handler_class,
+        requirements_path=requirements,
+    )
+    
+    # Upload and deploy
+    uploaded_model = local_model.upload(
+        display_name='custom-prediction-model'
+    )
+    
+    endpoint = uploaded_model.deploy(
+        machine_type='n1-standard-4',
+        min_replica_count=1,
+        max_replica_count=3,
+    )
+    
+    return endpoint
+```
+
+### Multi-Model Endpoints
+
+**Deploy Multiple Models to One Endpoint:**
+```python
+def create_multi_model_endpoint(
+    models,
+    endpoint_display_name,
+    traffic_split
+):
+    """Deploy multiple models with traffic splitting."""
+    
+    # Create endpoint
+    endpoint = aiplatform.Endpoint.create(
+        display_name=endpoint_display_name,
+        labels={'type': 'multi-model'}
+    )
+    
+    # Deploy each model
+    for idx, (model, traffic_pct) in enumerate(zip(models, traffic_split)):
+        model.deploy(
+            endpoint=endpoint,
+            deployed_model_display_name=f'model-v{idx+1}',
+            machine_type='n1-standard-4',
+            traffic_percentage=traffic_pct,
+            sync=True,
+        )
+    
+    print(f"Multi-model endpoint created: {endpoint.resource_name}")
+    print(f"Traffic split: {endpoint.traffic_split}")
+    
+    return endpoint
+
+# Example: Champion-Challenger setup
+models = [champion_model, challenger_model]
+traffic_split = [90, 10]  # 90% champion, 10% challenger
+
+endpoint = create_multi_model_endpoint(
+    models=models,
+    endpoint_display_name='champion-challenger-endpoint',
+    traffic_split=traffic_split
+)
+```
+
+### Private Endpoints
+
+**Deploy in Private VPC:**
+```python
+def create_private_endpoint(
+    model,
+    endpoint_display_name,
+    network,
+    enable_private_service_connect=True
+):
+    """Create private endpoint for secure access."""
+    
+    # Create endpoint with VPC configuration
+    endpoint = aiplatform.Endpoint.create(
+        display_name=endpoint_display_name,
+        network=network,
+        labels={'access': 'private'},
+    )
+    
+    # Deploy model to private endpoint
+    model.deploy(
+        endpoint=endpoint,
+        machine_type='n1-standard-4',
+        min_replica_count=1,
+        max_replica_count=3,
+        sync=True,
+    )
+    
+    print(f"Private endpoint created: {endpoint.resource_name}")
+    print(f"Network: {network}")
+    
+    return endpoint
+
+# Example
+private_endpoint = create_private_endpoint(
+    model=model,
+    endpoint_display_name='private-inference-endpoint',
+    network='projects/my-project/global/networks/my-vpc',
+)
+```
+
+---
+
+## 20. Quick Reference Checklist
 
 ### Setup
 - [ ] Enable Vertex AI API
@@ -1454,13 +2741,17 @@ ORDER BY
 - [ ] Create Cloud Storage buckets
 - [ ] Configure regional settings
 - [ ] Set up billing alerts
+- [ ] Enable audit logging
+- [ ] Configure VPC Service Controls (if required)
 
 ### Data Preparation
 - [ ] Validate data quality
 - [ ] Create Vertex AI datasets
-- [ ] Split data appropriately
+- [ ] Split data appropriately (train/val/test)
 - [ ] Document data schema
 - [ ] Version datasets
+- [ ] Implement data encryption (if required)
+- [ ] Set up Feature Store (for production)
 
 ### Training
 - [ ] Choose appropriate algorithm
@@ -1468,13 +2759,18 @@ ORDER BY
 - [ ] Configure hyperparameters
 - [ ] Enable checkpointing
 - [ ] Monitor training progress
+- [ ] Implement distributed training (for large models)
+- [ ] Run hyperparameter tuning
+- [ ] Track experiments
 
 ### Evaluation
 - [ ] Evaluate on test set
 - [ ] Compare multiple metrics
 - [ ] Analyze feature importance
-- [ ] Check for bias
+- [ ] Check for bias and fairness
 - [ ] Validate against baseline
+- [ ] Generate model explanations
+- [ ] Create model card
 
 ### Deployment
 - [ ] Create endpoint
@@ -1482,14 +2778,46 @@ ORDER BY
 - [ ] Enable monitoring
 - [ ] Test predictions
 - [ ] Implement A/B testing
+- [ ] Set up private endpoints (if required)
+- [ ] Configure caching strategy
+- [ ] Enable explainability
 
 ### MLOps
-- [ ] Register models
-- [ ] Set up monitoring
-- [ ] Create pipelines
+- [ ] Register models in registry
+- [ ] Set up continuous monitoring
+- [ ] Create ML pipelines
 - [ ] Implement CI/CD
 - [ ] Document workflows
+- [ ] Configure alerts
+- [ ] Implement governance policies
+- [ ] Schedule retraining
+
+### Security
+- [ ] Apply least privilege IAM
+- [ ] Enable encryption (CMEK if required)
+- [ ] Configure VPC Service Controls
+- [ ] Enable audit logging
+- [ ] Implement access controls
+- [ ] Review security best practices
+
+### Cost Optimization
+- [ ] Right-size machine types
+- [ ] Enable auto-scaling
+- [ ] Use batch prediction for bulk inference
+- [ ] Clean up unused resources
+- [ ] Monitor costs regularly
+- [ ] Use preemptible VMs for training
+- [ ] Implement prediction caching
+
+### Production Readiness
+- [ ] Load test endpoints
+- [ ] Set up monitoring and alerting
+- [ ] Create runbooks
+- [ ] Implement disaster recovery
+- [ ] Document API contracts
+- [ ] Set SLAs and SLOs
+- [ ] Create incident response plan
 
 ---
 
-*Best Practices for Google Cloud Data Engineer Certification*
+*Best Practices for Google Cloud Data Engineer Certification - Updated January 2026*
